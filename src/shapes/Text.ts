@@ -3,6 +3,7 @@ import { Context } from '../Context';
 import { Factory } from '../Factory';
 import { Shape, ShapeConfig } from '../Shape';
 import { Konva } from '../Global';
+import * as linkify from "linkifyjs";
 import {
   getNumberValidator,
   getStringValidator,
@@ -35,62 +36,64 @@ export interface TextConfig extends ShapeConfig {
   letterSpacing?: number;
   wrap?: string;
   ellipsis?: boolean;
+  findMethod?: any;
+  displayLinks?: boolean;
 }
 
 // constants
 var AUTO = 'auto',
-  //CANVAS = 'canvas',
-  CENTER = 'center',
-  JUSTIFY = 'justify',
-  CHANGE_KONVA = 'Change.konva',
-  CONTEXT_2D = '2d',
-  DASH = '-',
-  LEFT = 'left',
-  TEXT = 'text',
-  TEXT_UPPER = 'Text',
-  TOP = 'top',
-  BOTTOM = 'bottom',
-  MIDDLE = 'middle',
-  NORMAL = 'normal',
-  PX_SPACE = 'px ',
-  SPACE = ' ',
-  RIGHT = 'right',
-  WORD = 'word',
-  CHAR = 'char',
-  NONE = 'none',
-  ELLIPSIS = '…',
-  ATTR_CHANGE_LIST = [
-    'fontFamily',
-    'fontSize',
-    'fontStyle',
-    'fontVariant',
-    'padding',
-    'align',
-    'verticalAlign',
-    'lineHeight',
-    'text',
-    'width',
-    'height',
-    'wrap',
-    'ellipsis',
-    'letterSpacing',
-  ],
-  // cached variables
-  attrChangeListLen = ATTR_CHANGE_LIST.length;
+    //CANVAS = 'canvas',
+    CENTER = 'center',
+    JUSTIFY = 'justify',
+    CHANGE_KONVA = 'Change.konva',
+    CONTEXT_2D = '2d',
+    DASH = '-',
+    LEFT = 'left',
+    TEXT = 'text',
+    TEXT_UPPER = 'Text',
+    TOP = 'top',
+    BOTTOM = 'bottom',
+    MIDDLE = 'middle',
+    NORMAL = 'normal',
+    PX_SPACE = 'px ',
+    SPACE = ' ',
+    RIGHT = 'right',
+    WORD = 'word',
+    CHAR = 'char',
+    NONE = 'none',
+    ELLIPSIS = '…',
+    ATTR_CHANGE_LIST = [
+      'fontFamily',
+      'fontSize',
+      'fontStyle',
+      'fontVariant',
+      'padding',
+      'align',
+      'verticalAlign',
+      'lineHeight',
+      'text',
+      'width',
+      'height',
+      'wrap',
+      'ellipsis',
+      'letterSpacing',
+    ],
+    // cached variables
+    attrChangeListLen = ATTR_CHANGE_LIST.length;
 
 function normalizeFontFamily(fontFamily: string) {
   return fontFamily
-    .split(',')
-    .map((family) => {
-      family = family.trim();
-      const hasSpace = family.indexOf(' ') >= 0;
-      const hasQuotes = family.indexOf('"') >= 0 || family.indexOf("'") >= 0;
-      if (hasSpace && !hasQuotes) {
-        family = `"${family}"`;
-      }
-      return family;
-    })
-    .join(', ');
+      .split(',')
+      .map((family) => {
+        family = family.trim();
+        const hasSpace = family.indexOf(' ') >= 0;
+        const hasQuotes = family.indexOf('"') >= 0 || family.indexOf("'") >= 0;
+        if (hasSpace && !hasQuotes) {
+          family = `"${family}"`;
+        }
+        return family;
+      })
+      .join(', ');
 }
 
 var dummyContext: CanvasRenderingContext2D;
@@ -99,12 +102,48 @@ function getDummyContext() {
     return dummyContext;
   }
   dummyContext = Util.createCanvasElement().getContext(
-    CONTEXT_2D
+      CONTEXT_2D
   ) as CanvasRenderingContext2D;
   return dummyContext;
 }
+function _fillFunc(context) {
+  context.fillStyle = this.fill();
 
-function _fillFunc(context: Context) {
+  const linkLine = this.textArr.find(textLine => (
+      this._partialText === textLine.text &&
+      textLine.isLink
+  ));
+
+  if (linkLine && !linkLine.hrefPosition) {
+    context.fillStyle = "#419bf9";
+    context.fillText(this._partialText, this._partialTextX, this._partialTextY);
+
+    return;
+  }
+
+  if (linkLine && linkLine.hrefPosition) {
+    const partialLinkText = this._partialText.slice(linkLine.hrefPosition[0], linkLine.hrefPosition[1]);
+    const initialPartialText = this._partialText.slice(0, linkLine.hrefPosition[0]);
+    const lastPartialText = this._partialText.slice(linkLine.hrefPosition[1], this._partialText.length);
+
+    if (initialPartialText.length) {
+      const partialTextX = this._calculateStrokeInitialPos(linkLine.width);
+
+      context.fillStyle = this.fill();
+      context.fillText(initialPartialText, partialTextX, this._partialTextY);
+    }
+
+    if (lastPartialText.length) {
+      context.fillStyle = this.fill();
+      context.fillText(lastPartialText, linkLine.xEnd, this._partialTextY);
+    }
+
+    context.fillStyle = "#419bf9";
+    context.fillText(partialLinkText, linkLine.xStart, this._partialTextY);
+
+    return;
+  }
+
   context.fillText(this._partialText, this._partialTextX, this._partialTextY);
 }
 function _strokeFunc(context: Context) {
@@ -117,9 +156,9 @@ function checkDefaultFill(config: TextConfig) {
 
   // set default color to black
   if (
-    !config.fillLinearGradientColorStops &&
-    !config.fillRadialGradientColorStops &&
-    !config.fillPatternImage
+      !config.fillLinearGradientColorStops &&
+      !config.fillRadialGradientColorStops &&
+      !config.fillPatternImage
   ) {
     config.fill = config.fill || 'black';
   }
@@ -157,8 +196,10 @@ function checkDefaultFill(config: TextConfig) {
  * });
  */
 export class Text extends Shape<TextConfig> {
-  textArr: Array<{ text: string; width: number; lastInParagraph: boolean }>;
+  textArr: Array<{ text: string; width: number; lastInParagraph: boolean; isLink: boolean; autoNextLine: boolean; xStart: number; xEnd: number; yStart?:number; yEnd?: number; fullLink?: string; hrefPosition:any; }>;
   _partialText: string;
+  _findMethod: any;
+  _linkLines: any[];
   _partialTextX = 0;
   _partialTextY = 0;
 
@@ -166,6 +207,8 @@ export class Text extends Shape<TextConfig> {
   textHeight: number;
   constructor(config?: TextConfig) {
     super(checkDefaultFill(config));
+    this._findMethod = config?.displayLinks && (config?.findMethod ?? linkify.find);
+    this._linkLines = [];
     // update text data for certain attr changes
     for (var n = 0; n < attrChangeListLen; n++) {
       this.on(ATTR_CHANGE_LIST[n] + CHANGE_KONVA, this._setTextData);
@@ -173,27 +216,40 @@ export class Text extends Shape<TextConfig> {
     this._setTextData();
   }
 
+  _calculateStrokeInitialPos(linkWidth: number): number {
+
+    if (this.align() === LEFT) {
+      return 0;
+    }
+
+
+    const plus = (this.getWidth() - linkWidth + ((this.offsetX() ?? 0) / 2)) / 2;
+    const minus = (this.getWidth() - linkWidth - ((this.offsetX() ?? 0) / 2)) / 2;
+
+    return (plus + minus) / 2;
+  }
+
   _sceneFunc(context: Context) {
     var textArr = this.textArr,
-      textArrLen = textArr.length;
+        textArrLen = textArr.length;
 
     if (!this.text()) {
       return;
     }
 
     var padding = this.padding(),
-      fontSize = this.fontSize(),
-      lineHeightPx = this.lineHeight() * fontSize,
-      verticalAlign = this.verticalAlign(),
-      alignY = 0,
-      align = this.align(),
-      totalWidth = this.getWidth(),
-      letterSpacing = this.letterSpacing(),
-      fill = this.fill(),
-      textDecoration = this.textDecoration(),
-      shouldUnderline = textDecoration.indexOf('underline') !== -1,
-      shouldLineThrough = textDecoration.indexOf('line-through') !== -1,
-      n;
+        fontSize = this.fontSize(),
+        lineHeightPx = this.lineHeight() * fontSize,
+        verticalAlign = this.verticalAlign(),
+        alignY = 0,
+        align = this.align(),
+        totalWidth = this.getWidth(),
+        letterSpacing = this.letterSpacing(),
+        fill = this.fill(),
+        textDecoration = this.textDecoration(),
+        shouldUnderline = textDecoration.indexOf('underline') !== -1,
+        shouldLineThrough = textDecoration.indexOf('line-through') !== -1,
+        n;
 
     var translateY = 0;
     var translateY = lineHeightPx / 2;
@@ -221,12 +277,15 @@ export class Text extends Shape<TextConfig> {
       var lineTranslateX = 0;
       var lineTranslateY = 0;
       var obj = textArr[n],
-        text = obj.text,
-        width = obj.width,
-        lastLine = obj.lastInParagraph,
-        spacesNumber,
-        oneWord,
-        lineWidth;
+          text = obj.text,
+          width = obj.width,
+          lastLine = obj.lastInParagraph,
+          isLink = obj.isLink,
+          xStart = obj.xStart,
+          xEnd = obj.xEnd,
+          spacesNumber,
+          oneWord,
+          lineWidth;
 
       // horizontal alignment
       context.save();
@@ -241,16 +300,16 @@ export class Text extends Shape<TextConfig> {
         context.beginPath();
 
         context.moveTo(
-          lineTranslateX,
-          translateY + lineTranslateY + Math.round(fontSize / 2)
+            lineTranslateX,
+            translateY + lineTranslateY + Math.round(fontSize / 2)
         );
         spacesNumber = text.split(' ').length - 1;
         oneWord = spacesNumber === 0;
         lineWidth =
-          align === JUSTIFY && !lastLine ? totalWidth - padding * 2 : width;
+            align === JUSTIFY && !lastLine ? totalWidth - padding * 2 : width;
         context.lineTo(
-          lineTranslateX + Math.round(lineWidth),
-          translateY + lineTranslateY + Math.round(fontSize / 2)
+            lineTranslateX + Math.round(lineWidth),
+            translateY + lineTranslateY + Math.round(fontSize / 2)
         );
 
         // I have no idea what is real ratio
@@ -262,6 +321,22 @@ export class Text extends Shape<TextConfig> {
         context.stroke();
         context.restore();
       }
+      if (isLink) {
+        context.save();
+        context.beginPath();
+        context.moveTo(xStart, translateY + lineTranslateY + Math.round(fontSize / 2));
+        lineWidth = align === JUSTIFY && !lastLine ? totalWidth - padding * 2 : width;
+
+        context.lineTo(xEnd, translateY + lineTranslateY + Math.round(fontSize / 2));
+
+        context.lineWidth = fontSize / 15;
+        context.fillStyle = "#419bf9";
+        context.strokeStyle = "#419bf9";
+        context.stroke();
+        context.fill();
+
+        context.restore();
+      }
       if (shouldLineThrough) {
         context.save();
         context.beginPath();
@@ -269,12 +344,12 @@ export class Text extends Shape<TextConfig> {
         spacesNumber = text.split(' ').length - 1;
         oneWord = spacesNumber === 0;
         lineWidth =
-          align === JUSTIFY && lastLine && !oneWord
-            ? totalWidth - padding * 2
-            : width;
+            align === JUSTIFY && lastLine && !oneWord
+                ? totalWidth - padding * 2
+                : width;
         context.lineTo(
-          lineTranslateX + Math.round(lineWidth),
-          translateY + lineTranslateY
+            lineTranslateX + Math.round(lineWidth),
+            translateY + lineTranslateY
         );
         context.lineWidth = fontSize / 15;
         const gradient = this._getLinearGradient();
@@ -317,7 +392,7 @@ export class Text extends Shape<TextConfig> {
   }
   _hitFunc(context: Context) {
     var width = this.getWidth(),
-      height = this.getHeight();
+        height = this.getHeight();
 
     context.beginPath();
     context.rect(0, 0, width, height);
@@ -326,10 +401,10 @@ export class Text extends Shape<TextConfig> {
   }
   setText(text: string) {
     var str = Util._isString(text)
-      ? text
-      : text === null || text === undefined
-      ? ''
-      : text + '';
+        ? text
+        : text === null || text === undefined
+            ? ''
+            : text + '';
     this._setAttr(TEXT, str);
     return this;
   }
@@ -340,9 +415,9 @@ export class Text extends Shape<TextConfig> {
   getHeight() {
     var isAuto = this.attrs.height === AUTO || this.attrs.height === undefined;
     return isAuto
-      ? this.fontSize() * this.textArr.length * this.lineHeight() +
-          this.padding() * 2
-      : this.attrs.height;
+        ? this.fontSize() * this.textArr.length * this.lineHeight() +
+        this.padding() * 2
+        : this.attrs.height;
   }
   /**
    * get pure text width without padding
@@ -355,7 +430,7 @@ export class Text extends Shape<TextConfig> {
   }
   getTextHeight() {
     Util.warn(
-      'text.getTextHeight() method is deprecated. Use text.height() - for full height and text.fontSize() - for one line height.'
+        'text.getTextHeight() method is deprecated. Use text.height() - for full height and text.fontSize() - for one line height.'
     );
     return this.textHeight;
   }
@@ -370,8 +445,8 @@ export class Text extends Shape<TextConfig> {
    */
   measureSize(text) {
     var _context = getDummyContext(),
-      fontSize = this.fontSize(),
-      metrics;
+        fontSize = this.fontSize(),
+        metrics;
 
     _context.save();
     _context.font = this._getContextFont();
@@ -385,59 +460,140 @@ export class Text extends Shape<TextConfig> {
   }
   _getContextFont() {
     return (
-      this.fontStyle() +
-      SPACE +
-      this.fontVariant() +
-      SPACE +
-      (this.fontSize() + PX_SPACE) +
-      // wrap font family into " so font families with spaces works ok
-      normalizeFontFamily(this.fontFamily())
+        this.fontStyle() +
+        SPACE +
+        this.fontVariant() +
+        SPACE +
+        (this.fontSize() + PX_SPACE) +
+        // wrap font family into " so font families with spaces works ok
+        normalizeFontFamily(this.fontFamily())
     );
   }
-  _addTextLine(line: string) {
+  _addTextLine(line, autoNextLine = false) {
     const align = this.align();
     if (align === JUSTIFY) {
       line = line.trim();
     }
     var width = this._getTextWidth(line);
+
+    const maybeLinked = this._findMethod?.(line) ?? [];
+    const detectLink = (maybeLinked !== null && maybeLinked !== void 0 ? maybeLinked : []).some((result) => result.isLink);
+    const previousLine = this.textArr[this.textArr.length - 1];
+    const isLink = !autoNextLine
+        ? detectLink
+        : detectLink || previousLine && (
+        previousLine.isLink && (
+            !previousLine.hrefPosition ||
+            previousLine.text.length === previousLine.hrefPosition[1]
+        )
+    );
+
+    let hrefPosition = null;
+
+    if (isLink && !autoNextLine && line !== maybeLinked[0]?.value) {
+      hrefPosition = [maybeLinked[0].start, maybeLinked[0].end];
+    }
+
+    if (isLink && autoNextLine && !maybeLinked.length && line.split(" ").length > 1) {
+      hrefPosition = [0, line.split(" ")[0].length];
+    }
+
+    const { xStart, xEnd } = this._getTextPosition(width, hrefPosition, line);
+
     return this.textArr.push({
       text: line,
       width: width,
-      lastInParagraph: false,
+      isLink,
+      autoNextLine: (!!autoNextLine && !detectLink),
+      hrefPosition,
+      xStart,
+      xEnd,
+      lastInParagraph: false
+    });
+  }
+  _getTextPosition(width, hrefPosition, text) {
+    const xInitial = this._calculateStrokeInitialPos(width);
+
+    if (!hrefPosition) {
+      return {
+        xStart: xInitial,
+        xEnd: xInitial + width,
+      }
+    }
+
+    const startPadding = getDummyContext().measureText(text.slice(0, hrefPosition[0]))?.width ?? 0;
+    const endPadding = getDummyContext().measureText(text.slice(hrefPosition[0], hrefPosition[1]))?.width ?? 0;
+
+    return {
+      xStart: xInitial + startPadding,
+      xEnd: xInitial + startPadding + endPadding
+    }
+  }
+  _addLinePositions() {
+    const textArr = this.textArr;
+    const lineHeightPx = this.lineHeight() * this.fontSize();
+    const yInitial = (this.getHeight() - (textArr.length * lineHeightPx)) / 2;
+
+    let linkOrder = -1;
+
+    this.textArr = this.textArr.map((textLine, idx) => {
+      if (!textLine.isLink) {
+        return textLine;
+      }
+
+      if (textLine.isLink && !textLine.autoNextLine) {
+        linkOrder += 1;
+      }
+
+      return {
+        ...textLine,
+        yStart: yInitial + (lineHeightPx * idx),
+        yEnd: yInitial + (lineHeightPx * (idx + 1)),
+        fullLink: this._linkLines[linkOrder]?.href
+      }
     });
   }
   _getTextWidth(text: string) {
     var letterSpacing = this.letterSpacing();
     var length = text.length;
     return (
-      getDummyContext().measureText(text).width +
-      (length ? letterSpacing * (length - 1) : 0)
+        getDummyContext().measureText(text).width +
+        (length ? letterSpacing * (length - 1) : 0)
     );
   }
   _setTextData() {
     var lines = this.text().split('\n'),
-      fontSize = +this.fontSize(),
-      textWidth = 0,
-      lineHeightPx = this.lineHeight() * fontSize,
-      width = this.attrs.width,
-      height = this.attrs.height,
-      fixedWidth = width !== AUTO && width !== undefined,
-      fixedHeight = height !== AUTO && height !== undefined,
-      padding = this.padding(),
-      maxWidth = width - padding * 2,
-      maxHeightPx = height - padding * 2,
-      currentHeightPx = 0,
-      wrap = this.wrap(),
-      // align = this.align(),
-      shouldWrap = wrap !== NONE,
-      wrapAtWord = wrap !== CHAR && shouldWrap,
-      shouldAddEllipsis = this.ellipsis();
+        fontSize = +this.fontSize(),
+        textWidth = 0,
+        lineHeightPx = this.lineHeight() * fontSize,
+        width = this.attrs.width,
+        height = this.attrs.height,
+        fixedWidth = width !== AUTO && width !== undefined,
+        fixedHeight = height !== AUTO && height !== undefined,
+        padding = this.padding(),
+        maxWidth = width - padding * 2,
+        maxHeightPx = height - padding * 2,
+        currentHeightPx = 0,
+        wrap = this.wrap(),
+        // align = this.align(),
+        shouldWrap = wrap !== NONE,
+        wrapAtWord = wrap !== CHAR && shouldWrap,
+        shouldAddEllipsis = this.ellipsis();
 
     this.textArr = [];
+    this._linkLines = [];
+
     getDummyContext().font = this._getContextFont();
     var additionalWidth = shouldAddEllipsis ? this._getTextWidth(ELLIPSIS) : 0;
+
     for (var i = 0, max = lines.length; i < max; ++i) {
       var line = lines[i];
+
+      const linkLine = (this._findMethod?.(line) ?? []).filter((result) => result.isLink);
+
+      if (linkLine.length) {
+        this._linkLines.push(...linkLine);
+      }
 
       var lineWidth = this._getTextWidth(line);
       if (fixedWidth && lineWidth > maxWidth) {
@@ -451,13 +607,13 @@ export class Text extends Shape<TextConfig> {
            * that would fit in the specified width
            */
           var low = 0,
-            high = line.length,
-            match = '',
-            matchWidth = 0;
+              high = line.length,
+              match = '',
+              matchWidth = 0;
           while (low < high) {
             var mid = (low + high) >>> 1,
-              substr = line.slice(0, mid + 1),
-              substrWidth = this._getTextWidth(substr) + additionalWidth;
+                substr = line.slice(0, mid + 1),
+                substrWidth = this._getTextWidth(substr) + additionalWidth;
             if (substrWidth <= maxWidth) {
               low = mid + 1;
               match = substr;
@@ -482,8 +638,8 @@ export class Text extends Shape<TextConfig> {
                 wrapIndex = match.length;
               } else {
                 wrapIndex =
-                  Math.max(match.lastIndexOf(SPACE), match.lastIndexOf(DASH)) +
-                  1;
+                    Math.max(match.lastIndexOf(SPACE), match.lastIndexOf(DASH)) +
+                    1;
               }
               if (wrapIndex > 0) {
                 // re-cut the substring found at the space/dash position
@@ -492,15 +648,19 @@ export class Text extends Shape<TextConfig> {
                 matchWidth = this._getTextWidth(match);
               }
             }
-            // if (align === 'right') {
             match = match.trimRight();
-            // }
-            this._addTextLine(match);
+
+            const linesMaybeLinkPart = (this._findMethod?.(lines[i]) ?? [])[0]?.value;
+            const maybeFoundLinkPart = this._linkLines?.find(someLine => someLine.value === linesMaybeLinkPart)?.value;
+            const isAutoNextLine = lines[i].includes(match) && maybeFoundLinkPart && !match.includes(maybeFoundLinkPart);
+
+            this._addTextLine(match, isAutoNextLine);
+
             textWidth = Math.max(textWidth, matchWidth);
             currentHeightPx += lineHeightPx;
 
             var shouldHandleEllipsis =
-              this._shouldHandleEllipsis(currentHeightPx);
+                this._shouldHandleEllipsis(currentHeightPx);
             if (shouldHandleEllipsis) {
               this._tryToAddEllipsisToLastLine();
               /*
@@ -509,14 +669,20 @@ export class Text extends Shape<TextConfig> {
                */
               break;
             }
+
+            let trimmedSpace = line.slice(low - 1, low) === " ";
             line = line.slice(low);
+
+            const initialLength = line.length;
             line = line.trimLeft();
+            trimmedSpace = trimmedSpace || (line.length !== initialLength);
+
             if (line.length > 0) {
               // Check if the remaining text would fit on one line
               lineWidth = this._getTextWidth(line);
               if (lineWidth <= maxWidth) {
                 // if it does, add the line and break out of the loop
-                this._addTextLine(line);
+                this._addTextLine(line, !trimmedSpace);
                 currentHeightPx += lineHeightPx;
                 textWidth = Math.max(textWidth, lineWidth);
                 break;
@@ -550,6 +716,7 @@ export class Text extends Shape<TextConfig> {
     //     maxTextWidth = Math.max(maxTextWidth, this.textArr[j].width);
     // }
     this.textWidth = textWidth;
+    this._addLinePositions();
   }
 
   /**
@@ -561,26 +728,26 @@ export class Text extends Shape<TextConfig> {
    */
   _shouldHandleEllipsis(currentHeightPx: number): boolean {
     var fontSize = +this.fontSize(),
-      lineHeightPx = this.lineHeight() * fontSize,
-      height = this.attrs.height,
-      fixedHeight = height !== AUTO && height !== undefined,
-      padding = this.padding(),
-      maxHeightPx = height - padding * 2,
-      wrap = this.wrap(),
-      shouldWrap = wrap !== NONE;
+        lineHeightPx = this.lineHeight() * fontSize,
+        height = this.attrs.height,
+        fixedHeight = height !== AUTO && height !== undefined,
+        padding = this.padding(),
+        maxHeightPx = height - padding * 2,
+        wrap = this.wrap(),
+        shouldWrap = wrap !== NONE;
 
     return (
-      !shouldWrap ||
-      (fixedHeight && currentHeightPx + lineHeightPx > maxHeightPx)
+        !shouldWrap ||
+        (fixedHeight && currentHeightPx + lineHeightPx > maxHeightPx)
     );
   }
 
   _tryToAddEllipsisToLastLine(): void {
     var width = this.attrs.width,
-      fixedWidth = width !== AUTO && width !== undefined,
-      padding = this.padding(),
-      maxWidth = width - padding * 2,
-      shouldAddEllipsis = this.ellipsis();
+        fixedWidth = width !== AUTO && width !== undefined,
+        padding = this.padding(),
+        maxWidth = width - padding * 2,
+        shouldAddEllipsis = this.ellipsis();
 
     var lastLine = this.textArr[this.textArr.length - 1];
     if (!lastLine || !shouldAddEllipsis) {
@@ -593,9 +760,8 @@ export class Text extends Shape<TextConfig> {
         lastLine.text = lastLine.text.slice(0, lastLine.text.length - 3);
       }
     }
-
     this.textArr.splice(this.textArr.length - 1, 1);
-    this._addTextLine(lastLine.text + ELLIPSIS);
+    this._addTextLine(lastLine.text + ELLIPSIS, lastLine.autoNextLine);
   }
 
   // for text we can't disable stroke scaling

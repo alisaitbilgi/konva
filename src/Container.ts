@@ -220,9 +220,9 @@ export abstract class Container<
    *  return node.getType() === 'Shape'
    * })
    */
-  findOne<ChildNode extends Node = Node>(selector: string | Function): ChildNode | undefined {
+  findOne<ChildNode extends Node = Node>(selector: string | Function): ChildNode {
     var result = this._generalFind<ChildNode>(selector, true);
-    return result.length > 0 ? result[0] : undefined;
+    return result[0];
   }
   _generalFind<ChildNode extends Node = Node>(
     selector: string | Function,
