@@ -38,6 +38,7 @@ export interface TextConfig extends ShapeConfig {
   ellipsis?: boolean;
   findMethod?: any;
   displayLinks?: boolean;
+  linkColor?: string;
 }
 
 // constants
@@ -115,7 +116,7 @@ function _fillFunc(context) {
   ));
 
   if (linkLine && !linkLine.hrefPosition) {
-    context.fillStyle = "#419bf9";
+    context.fillStyle = this._linkColor || "#419bf9";
     context.fillText(this._partialText, this._partialTextX, this._partialTextY);
 
     return;
@@ -138,7 +139,7 @@ function _fillFunc(context) {
       context.fillText(lastPartialText, linkLine.xEnd, this._partialTextY);
     }
 
-    context.fillStyle = "#419bf9";
+    context.fillStyle = this._linkColor || "#419bf9";
     context.fillText(partialLinkText, linkLine.xStart, this._partialTextY);
 
     return;
@@ -198,6 +199,7 @@ function checkDefaultFill(config: TextConfig) {
 export class Text extends Shape<TextConfig> {
   textArr: Array<{ text: string; width: number; lastInParagraph: boolean; isLink: boolean; autoNextLine: boolean; xStart: number; xEnd: number; yStart?:number; yEnd?: number; fullLink?: string; hrefPosition:any; }>;
   _partialText: string;
+  _linkColor: string;
   _findMethod: any;
   _linkLines: any[];
   _partialTextX = 0;
@@ -208,6 +210,7 @@ export class Text extends Shape<TextConfig> {
   constructor(config?: TextConfig) {
     super(checkDefaultFill(config));
     this._findMethod = config?.displayLinks && (config?.findMethod ?? linkify.find);
+    this._linkColor = config?.linkColor || "#419bf9";
     this._linkLines = [];
     // update text data for certain attr changes
     for (var n = 0; n < attrChangeListLen; n++) {
@@ -330,8 +333,8 @@ export class Text extends Shape<TextConfig> {
         context.lineTo(xEnd, translateY + lineTranslateY + Math.round(fontSize / 2));
 
         context.lineWidth = fontSize / 15;
-        context.fillStyle = "#419bf9";
-        context.strokeStyle = "#419bf9";
+        context.fillStyle = this._linkColor || "#419bf9";
+        context.strokeStyle = this._linkColor || "#419bf9";
         context.stroke();
         context.fill();
 
