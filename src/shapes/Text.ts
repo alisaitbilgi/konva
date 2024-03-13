@@ -9,6 +9,7 @@ import {
   getStringValidator,
   getNumberOrAutoValidator,
   getBooleanValidator,
+  getStringOrGradientValidator,
 } from '../Validators';
 import { _registerNode } from '../Global';
 
@@ -38,7 +39,7 @@ export interface TextConfig extends ShapeConfig {
   ellipsis?: boolean;
   findMethod?: any;
   displayLinks?: boolean;
-  linkColor?: string;
+  linkFill?: string;
 }
 
 // constants
@@ -78,6 +79,7 @@ var AUTO = 'auto',
       'wrap',
       'ellipsis',
       'letterSpacing',
+      'linkFill',
     ],
     // cached variables
     attrChangeListLen = ATTR_CHANGE_LIST.length;
@@ -116,7 +118,7 @@ function _fillFunc(context) {
   ));
 
   if (linkLine && !linkLine.hrefPosition) {
-    context.fillStyle = this._linkColor || "#419bf9";
+    context.fillStyle = this.linkFill() || this.fill();
     context.fillText(this._partialText, this._partialTextX, this._partialTextY);
 
     return;
@@ -139,7 +141,7 @@ function _fillFunc(context) {
       context.fillText(lastPartialText, linkLine.xEnd, this._partialTextY);
     }
 
-    context.fillStyle = this._linkColor || "#419bf9";
+    context.fillStyle = this.linkFill() || this.fill();
     context.fillText(partialLinkText, linkLine.xStart, this._partialTextY);
 
     return;
@@ -199,7 +201,6 @@ function checkDefaultFill(config: TextConfig) {
 export class Text extends Shape<TextConfig> {
   textArr: Array<{ text: string; width: number; lastInParagraph: boolean; isLink: boolean; autoNextLine: boolean; xStart: number; xEnd: number; yStart?:number; yEnd?: number; fullLink?: string; hrefPosition:any; }>;
   _partialText: string;
-  _linkColor: string;
   _findMethod: any;
   _linkLines: any[];
   _partialTextX = 0;
@@ -210,7 +211,6 @@ export class Text extends Shape<TextConfig> {
   constructor(config?: TextConfig) {
     super(checkDefaultFill(config));
     this._findMethod = config?.displayLinks && (config?.findMethod ?? linkify.find);
-    this._linkColor = config?.linkColor || "#419bf9";
     this._linkLines = [];
     // update text data for certain attr changes
     for (var n = 0; n < attrChangeListLen; n++) {
@@ -333,8 +333,8 @@ export class Text extends Shape<TextConfig> {
         context.lineTo(xEnd, translateY + lineTranslateY + Math.round(fontSize / 2));
 
         context.lineWidth = fontSize / 15;
-        context.fillStyle = this._linkColor || "#419bf9";
-        context.strokeStyle = this._linkColor || "#419bf9";
+        context.fillStyle = this.linkFill() || this.fill();
+        context.strokeStyle = this.linkFill() || this.fill();
         context.stroke();
         context.fill();
 
@@ -786,6 +786,7 @@ export class Text extends Shape<TextConfig> {
   text: GetSet<string, this>;
   wrap: GetSet<string, this>;
   ellipsis: GetSet<boolean, this>;
+  linkFill: GetSet<string, this>;
 }
 
 Text.prototype._fillFunc = _fillFunc;
@@ -936,6 +937,13 @@ Factory.addGetterSetter(Text, 'padding', 0, getNumberValidator());
  */
 
 Factory.addGetterSetter(Text, 'align', LEFT);
+
+Factory.addGetterSetter(
+  Shape,
+  'linkFill',
+  undefined,
+  getStringOrGradientValidator()
+);
 
 /**
  * get/set vertical align of text.  Can be 'top', 'middle', 'bottom'.
