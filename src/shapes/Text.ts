@@ -23,6 +23,17 @@ export function stringToArray(string: string) {
   return Array.from(string);
 }
 
+const DEFAULT_LINK_COLOR = '#419bf9';
+
+interface MentionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+}
+
+
 export interface TextConfig extends ShapeConfig {
   text?: string;
   fontFamily?: string;
@@ -40,6 +51,7 @@ export interface TextConfig extends ShapeConfig {
   findMethod?: any;
   displayLinks?: boolean;
   linkFill?: string;
+  mentionBg?: string;
 }
 
 // constants
@@ -80,6 +92,7 @@ var AUTO = 'auto',
       'ellipsis',
       'letterSpacing',
       'linkFill',
+      'mentionBg'
     ],
     // cached variables
     attrChangeListLen = ATTR_CHANGE_LIST.length;
@@ -109,25 +122,31 @@ function getDummyContext() {
   ) as CanvasRenderingContext2D;
   return dummyContext;
 }
-function _fillFunc(context) {
+function _fillFunc(this: Text, context: Context) {
   context.fillStyle = this.fill();
 
-  const linkLine = this.textArr.find(textLine => (
-      this._partialText === textLine.text &&
-      textLine.isLink
+  const linkLine = this.textArr.find((textLine) => (
+    this._partialText === textLine.text &&
+    textLine.isLink
   ));
 
   if (linkLine && !linkLine.hrefPosition) {
-    context.fillStyle = this.linkFill() || this.fill();
+    context.fillStyle = this.linkFill() || DEFAULT_LINK_COLOR;
     context.fillText(this._partialText, this._partialTextX, this._partialTextY);
 
     return;
   }
 
   if (linkLine && linkLine.hrefPosition) {
-    const partialLinkText = this._partialText.slice(linkLine.hrefPosition[0], linkLine.hrefPosition[1]);
+    const partialLinkText = this._partialText.slice(
+      linkLine.hrefPosition[0],
+      linkLine.hrefPosition[1]
+    );
     const initialPartialText = this._partialText.slice(0, linkLine.hrefPosition[0]);
-    const lastPartialText = this._partialText.slice(linkLine.hrefPosition[1], this._partialText.length);
+    const lastPartialText = this._partialText.slice(
+      linkLine.hrefPosition[1],
+      this._partialText.length
+    );
 
     if (initialPartialText.length) {
       const partialTextX = this._calculateStrokeInitialPos(linkLine.width);
@@ -141,7 +160,7 @@ function _fillFunc(context) {
       context.fillText(lastPartialText, linkLine.xEnd, this._partialTextY);
     }
 
-    context.fillStyle = this.linkFill() || this.fill();
+    context.fillStyle = this.linkFill() || DEFAULT_LINK_COLOR;
     context.fillText(partialLinkText, linkLine.xStart, this._partialTextY);
 
     return;
@@ -149,6 +168,7 @@ function _fillFunc(context) {
 
   context.fillText(this._partialText, this._partialTextX, this._partialTextY);
 }
+
 function _strokeFunc(context: Context) {
   context.setAttr('miterLimit', 2);
   context.strokeText(this._partialText, this._partialTextX, this._partialTextY);
@@ -205,6 +225,7 @@ export class Text extends Shape<TextConfig> {
   _linkLines: any[];
   _partialTextX = 0;
   _partialTextY = 0;
+  _mentionRects: MentionRect[] = [];
 
   textWidth: number;
   textHeight: number;
@@ -240,6 +261,9 @@ export class Text extends Shape<TextConfig> {
       return;
     }
 
+    const mentionRegex = /@\w+/g;
+    this._mentionRects = [];
+
     var padding = this.padding(),
         fontSize = this.fontSize(),
         lineHeightPx = this.lineHeight() * fontSize,
@@ -254,7 +278,6 @@ export class Text extends Shape<TextConfig> {
         shouldLineThrough = textDecoration.indexOf('line-through') !== -1,
         n;
 
-    var translateY = 0;
     var translateY = lineHeightPx / 2;
 
     var lineTranslateX = 0;
@@ -381,12 +404,101 @@ export class Text extends Shape<TextConfig> {
           lineTranslateX += this.measureSize(letter).width + letterSpacing;
         }
       } else {
-        this._partialTextX = lineTranslateX;
-        this._partialTextY = translateY + lineTranslateY;
-        this._partialText = text;
+        // mention-aware drawing
+        mentionRegex.lastIndex = 0;
 
-        context.fillStrokeShape(this);
+        const parts: Array<{ text: string; isMention: boolean }> = [];
+        let lastIndex = 0;
+        let match: RegExpExecArray | null;
+
+        while ((match = mentionRegex.exec(text)) !== null) {
+          if (match.index > lastIndex) {
+            parts.push({
+              text: text.slice(lastIndex, match.index),
+              isMention: false,
+            });
+          }
+
+          parts.push({
+            text: match[0],
+            isMention: true,
+          });
+
+          lastIndex = match.index + match[0].length;
+        }
+
+        if (lastIndex < text.length) {
+          parts.push({
+            text: text.slice(lastIndex),
+            isMention: false,
+          });
+        }
+
+        for (const part of parts) {
+          this._partialTextX = lineTranslateX;
+          this._partialTextY = translateY + lineTranslateY;
+          this._partialText = part.text;
+
+          if (part.isMention) {
+            const { width } = this.measureSize(part.text);
+            const fontSize = this.fontSize();
+            const bgPaddingX = 4;
+            const bgPaddingY = 2;
+            const radius = 3;
+
+            // mention background (dynamic)
+            const mentionBg = this.mentionBg ? this.mentionBg() : "#facc15"; // yellow-400 default
+            const bgX = lineTranslateX - bgPaddingX / 2;
+            const bgY = translateY + lineTranslateY - fontSize / 2 - bgPaddingY;
+            const bgWidth = width + bgPaddingX;
+            const bgHeight = fontSize + bgPaddingY * 2;
+
+            // draw rounded background
+            context.save();
+            context.beginPath();
+            const r = radius;
+            context.moveTo(bgX + r, bgY);
+            context.lineTo(bgX + bgWidth - r, bgY);
+            context.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + r);
+            context.lineTo(bgX + bgWidth, bgY + bgHeight - r);
+            context.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - r, bgY + bgHeight);
+            context.lineTo(bgX + r, bgY + bgHeight);
+            context.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - r);
+            context.lineTo(bgX, bgY + r);
+            context.quadraticCurveTo(bgX, bgY, bgX + r, bgY);
+            context.closePath();
+            context.fillStyle = mentionBg;
+            context.fill();
+            context.restore();
+
+            // draw mention text (bold)
+            const baseFont = this._getContextFont();
+            const prevFont = context.font;      // 👈 remember previous font
+            context.font = baseFont;
+            context.fillStyle = this.fill();
+            context.textBaseline = "middle";
+            context.fillText(part.text, lineTranslateX, translateY + lineTranslateY);
+            context.font = prevFont;            // 👈 restore normal font
+
+            // store clickable rect for hit detection
+            this._mentionRects = this._mentionRects || [];
+            this._mentionRects.push({
+              x: bgX,
+              y: bgY,
+              width: bgWidth,
+              height: bgHeight,
+              text: part.text,
+            });
+
+            lineTranslateX += width;
+            continue;
+          }
+
+          context.fillStrokeShape(this);
+          lineTranslateX += this.measureSize(part.text).width;
+        }
       }
+
       context.restore();
       if (textArrLen > 1) {
         translateY += lineHeightPx;
@@ -535,11 +647,30 @@ export class Text extends Shape<TextConfig> {
   _addLinePositions() {
     const textArr = this.textArr;
     const lineHeightPx = this.lineHeight() * this.fontSize();
-    const yInitial = (this.getHeight() - (textArr.length * lineHeightPx)) / 2;
+    const totalTextHeight = textArr.length * lineHeightPx;
+
+    let yInitial = 0;
+    const valign = this.verticalAlign ? this.verticalAlign() : TOP;
+
+    switch (valign) {
+      case MIDDLE: {
+        yInitial = (this.height() - totalTextHeight) / 2;
+        break;
+      }
+      case BOTTOM: {
+        yInitial = this.height() - totalTextHeight;
+        break;
+      }
+      case TOP:
+      default: {
+        yInitial = 0;
+        break;
+      }
+    }
 
     let linkOrder = -1;
 
-    this.textArr = this.textArr.map((textLine, idx) => {
+    this.textArr = textArr.map((textLine, idx) => {
       if (!textLine.isLink) {
         return textLine;
       }
@@ -548,14 +679,19 @@ export class Text extends Shape<TextConfig> {
         linkOrder += 1;
       }
 
+      const linkMeta = this._linkLines[linkOrder];
+      const yStart = yInitial + lineHeightPx * idx;
+      const yEnd = yInitial + lineHeightPx * (idx + 1);
+
       return {
         ...textLine,
-        yStart: yInitial + (lineHeightPx * idx),
-        yEnd: yInitial + (lineHeightPx * (idx + 1)),
-        fullLink: this._linkLines[linkOrder]?.href
-      }
+        yStart,
+        yEnd,
+        fullLink: linkMeta?.href,
+      };
     });
   }
+
   _getTextWidth(text: string) {
     var letterSpacing = this.letterSpacing();
     var length = text.length;
@@ -767,6 +903,26 @@ export class Text extends Shape<TextConfig> {
     this._addTextLine(lastLine.text + ELLIPSIS, lastLine.autoNextLine);
   }
 
+  getMentionAtPoint(pos: { x: number; y: number }): MentionRect | null {
+    if (!this._mentionRects || this._mentionRects.length === 0) {
+      return null;
+    }
+
+    const rect = this._mentionRects.find((r) => {
+      const withinX = pos.x >= r.x && pos.x <= r.x + r.width;
+      const withinY = pos.y >= r.y && pos.y <= r.y + r.height;
+
+      return withinX && withinY;
+    });
+
+    if (!rect) {
+      return null;
+    }
+
+    return rect;
+  }
+
+
   // for text we can't disable stroke scaling
   // if we do, the result will be unexpected
   getStrokeScaleEnabled() {
@@ -787,6 +943,7 @@ export class Text extends Shape<TextConfig> {
   wrap: GetSet<string, this>;
   ellipsis: GetSet<boolean, this>;
   linkFill: GetSet<string, this>;
+  mentionBg: GetSet<string, this>;
 }
 
 Text.prototype._fillFunc = _fillFunc;
@@ -939,7 +1096,7 @@ Factory.addGetterSetter(Text, 'padding', 0, getNumberValidator());
 Factory.addGetterSetter(Text, 'align', LEFT);
 
 Factory.addGetterSetter(
-  Shape,
+  Text,
   'linkFill',
   undefined,
   getStringOrGradientValidator()
@@ -1059,3 +1216,11 @@ Factory.addGetterSetter(Text, 'text', '', getStringValidator());
  */
 
 Factory.addGetterSetter(Text, 'textDecoration', '');
+
+Factory.addGetterSetter(
+  Text,
+  'mentionBg',
+  '#facc15',
+  getStringOrGradientValidator()
+);
+

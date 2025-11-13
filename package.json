@@ -1,6 +1,6 @@
 {
   "name": "konva-extended",
-  "version": "9.5.1",
+  "version": "9.6.1",
   "author": "Ali Sait Bilgi",
   "files": [
     "README.md",
@@ -59,11 +59,12 @@
     }
   ],
   "dependencies": {
-    "linkifyjs": "^4.1.1"
+    "linkifyjs": "4.1.1"
   },
   "devDependencies": {
     "@parcel/transformer-image": "2.8.3",
     "@size-limit/preset-big-lib": "^8.2.4",
+    "@types/linkify-it": "^3.0.2",
     "@types/mocha": "^10.0.1",
     "canvas": "^2.11.2",
     "chai": "4.3.7",
